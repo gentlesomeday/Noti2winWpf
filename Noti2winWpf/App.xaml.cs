@@ -17,27 +17,29 @@ namespace Noti2winWpf
     /// </summary>
     public partial class App : Application
     {
+        public static string WeChatPathStr { get; set; } = string.Empty;
+        public static string QQPathStr { get; set; } = string.Empty;
         protected override void OnStartup(StartupEventArgs e)
         {
             base.OnStartup(e);
             ToastNotificationManagerCompat.OnActivated += toastArgs =>
             {
-           
+
                 ToastArguments args = ToastArguments.Parse(toastArgs.Argument);
 
                 // Need to dispatch to UI thread if performing UI operations
-                Application.Current.Dispatcher.Invoke( delegate
+                Application.Current.Dispatcher.Invoke(delegate
                 {
                     // TODO: Show the corresponding content
-                    switch (args["conversation"]) {
+                    switch (args["conversation"])
+                    {
                         case "wechat":
-                            ScheduleOpenExe(@"C:\Program Files\Tencent\WeChat\WeChat.exe",100);
+                            ScheduleOpenExe(@WeChatPathStr, 100);
                             break;
                         case "qq":
-                            MessageBox.Show("QQ conversation activated.");
+                            ScheduleOpenExe(@QQPathStr, 100); 
                             break;
                         default:
-                            MessageBox.Show("Unknown conversation type.");
                             break;
                     }
                 });
@@ -67,8 +69,8 @@ namespace Noti2winWpf
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"Failed to open {exePath}: {ex.Message}");
-                MessageBox.Show($"Failed to open {exePath}: {ex.Message}");
+                Utils.WriteLog($"Failed to open {exePath}: {ex.Message}",Utils.LogErr);
+                Console.WriteLine($"Failed to open {exePath}: {ex.Message}");
             }
         }
     }
