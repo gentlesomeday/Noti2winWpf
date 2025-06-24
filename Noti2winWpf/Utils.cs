@@ -8,6 +8,10 @@ using System.Net.Sockets;
 using System.Net;
 using System.Text;
 using System.Threading.Tasks;
+using Microsoft.Toolkit.Uwp.Notifications;
+using System.Drawing.Drawing2D;
+using static Noti2winWpf.MainWindow;
+using Microsoft.Win32;
 
 namespace Noti2winWpf
 {
@@ -85,32 +89,36 @@ namespace Noti2winWpf
             return $"{(value >> 24) & 0xFF}.{(value >> 16) & 0xFF}.{(value >> 8) & 0xFF}.{value & 0xFF}";
         }
 
-        public static string Hex2Str(int num) {
-            string hexStr=num.ToString("X4");
+        public static string Hex2Str(int num)
+        {
+            string hexStr = num.ToString("X4");
             string input = "0123456789";
             string map = "zyxwvutsrq";
             string result = "";
-            foreach (char c in hexStr) {
+            foreach (char c in hexStr)
+            {
                 if (input.Contains(c))
                 {
                     int index = c - '0';
                     result += map[index];
                 }
-                else {
+                else
+                {
                     result += c;
                 }
             }
             return result;
         }
 
-        public static void WriteLog(string message,string logType)
+        public static void WriteLog(string message, string logType)
         {
             try
             {
                 string logFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "log.txt");
                 using (StreamWriter sw = new StreamWriter(logFilePath, true))
                 {
-                    if (logType == null) {
+                    if (logType == null)
+                    {
                         sw.WriteLine($"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} {message}");
                     }
                     else if (logType == LogErr)
@@ -121,7 +129,7 @@ namespace Noti2winWpf
                     {
                         sw.WriteLine($"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} {LogRun} {message}");
                     }
-                  
+
                 }
             }
             catch (Exception ex)
@@ -189,5 +197,197 @@ namespace Noti2winWpf
                 return false;
             return true;
         }
+
+        public static void OrdinaryNoti(String title, String content)
+        {
+            if (string.IsNullOrEmpty(title))
+            {
+                new ToastContentBuilder()
+                 .AddArgument("notification", "normal")
+                    .AddText(content)
+                    .Show();
+            }
+            else
+            {
+                new ToastContentBuilder()
+                    .AddArgument("notification", "normal")
+                    .AddText(title)
+                    .AddText(content)
+                    .Show();
+            }
+        }
+
+        public static void showMsgNoti(NotiType type, string title, string content, string iconBase64)
+        {
+            string currentDirectory = AppDomain.CurrentDomain.BaseDirectory;
+            string imgPath = "";
+            string argumentStr = "conversation";
+            string conType = "";
+
+            switch (type)
+            {
+                case NotiType.wechat:
+                    {
+                        conType = "wechat";
+                        imgPath = System.IO.Path.Combine(currentDirectory, "Image", "wechat.png");
+                        break;
+                    }
+                case NotiType.qq:
+                    {
+                        conType = "qq";
+                        imgPath = System.IO.Path.Combine(currentDirectory, "Image", "QQ.png");
+                        break;
+                    }
+                case NotiType.dingtalk:
+                    {
+                        conType = "dingtalk";
+                        imgPath = System.IO.Path.Combine(currentDirectory, "Image", "ding.png");
+                        break;
+                    }
+                case NotiType.phone:
+                    {
+                        conType = "phone";
+                        imgPath = System.IO.Path.Combine(currentDirectory, "Image", "phone.png");
+                        break;
+                    }
+            }
+            if (iconBase64 != null && iconBase64.Length > 1)
+            {
+                try
+                {
+
+                    byte[] imageBytes = Convert.FromBase64String(iconBase64);
+                    string tempFile = System.IO.Path.Combine(currentDirectory, "IconTemp", Guid.NewGuid().ToString() + ".jpg");
+                    using (var ms = new MemoryStream(imageBytes))
+                    using (var img = System.Drawing.Image.FromStream(ms))
+                    {
+                        img.Save(tempFile, System.Drawing.Imaging.ImageFormat.Png);
+                    }
+
+                    // 4. 显示通知
+                    new ToastContentBuilder()
+                        .AddArgument(argumentStr, conType)
+                        .AddText(title)
+                        .AddText(content)
+                        .AddAppLogoOverride(new Uri(@tempFile), ToastGenericAppLogoCrop.Default)
+                        .Show();
+                }
+                catch (Exception e)
+                {
+                    Utils.WriteLog("Error decoding iconBase64: " + e.Message, Utils.LogErr);
+                    new ToastContentBuilder()
+               .AddArgument(argumentStr, conType)
+               .AddText(title)
+               .AddText(content)
+               .AddAppLogoOverride(new Uri(@imgPath), ToastGenericAppLogoCrop.Default)
+               .Show();
+                }
+            }
+            else
+            {
+                new ToastContentBuilder()
+                    .AddArgument(argumentStr, conType)
+                    .AddText(title)
+                    .AddText(content)
+                    .AddAppLogoOverride(new Uri(@imgPath), ToastGenericAppLogoCrop.Default)
+                    .Show();
+            }
+        }
+
+        public static List<string> GetLocalIPv4s()
+        {
+            List<string> localIPs = new List<string>();
+            var host = Dns.GetHostEntry(Dns.GetHostName());
+            foreach (var ip in host.AddressList)
+            {
+                if (ip.AddressFamily == AddressFamily.InterNetwork)
+                {
+                    localIPs.Add(ip.ToString());
+                }
+            }
+            return localIPs;
+        }
+
+        public static string GetWeChatExecutablePath()
+        {
+            try
+            {
+                string regPath = @"Software\Tencent\WeChat";
+                using (RegistryKey key = Registry.CurrentUser.OpenSubKey(regPath))
+                {
+                    if (key != null)
+                    {
+                        object installPath = key.GetValue("InstallPath");
+                        if (installPath != null)
+                        {
+                            string exePath = Path.Combine(installPath.ToString(), "WeChat.exe");
+                            if (File.Exists(exePath))
+                                return exePath;
+                        }
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                Utils.WriteLog("Error getting WeChat path: " + e.Message, Utils.LogErr);
+            }
+
+
+            return string.Empty;
+        }
+
+
+        public static string GetQQNTExecutablePath()
+        {
+            try
+            {
+                string regPath = @"Software\Tencent\QQNT";
+                using (RegistryKey key = Registry.LocalMachine.OpenSubKey(regPath))
+                {
+                    if (key != null)
+                    {
+                        object installPath = key.GetValue("Install");
+                        if (installPath != null)
+                        {
+                            string exePath = Path.Combine(installPath.ToString(), "QQ.exe");
+                            if (File.Exists(exePath))
+                                return exePath;
+                        }
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                Utils.WriteLog("Error getting QQNT path: " + e.Message, Utils.LogErr);
+            }
+
+            return string.Empty;
+        }
+
+        public static string GetDingTalkExecutablePath()
+        {
+            //钉钉在注册表中并没有安装路径  只能根据常见安装路径来尝试获取
+            try
+            {
+                string exePath1 = @"C:\Program Files (x86)\DingDing\DingtalkLauncher.exe";
+                string exePath2 = @"D:\Program Files (x86)\DingDing\DingtalkLauncher.exe";
+                if (File.Exists(exePath1))
+                {
+                    return exePath1;
+                }
+                else if (File.Exists(exePath2))
+                {
+                    return exePath2;
+                }
+            }
+            catch (Exception e)
+            {
+                Utils.WriteLog("Error getting DingTalk path: " + e.Message, Utils.LogErr);
+            }
+
+            return string.Empty;
+        }
+
+
     }
 }

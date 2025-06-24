@@ -12,6 +12,7 @@ namespace Noti2winWpf
     {
         public string QQPath { get; set; } = string.Empty;
         public string WeChatPath { get; set; } = string.Empty;
+        public string DingTalkPath { get; set; } = string.Empty;
         public int AutoMinimize { get; set; } = 1;
     }
 

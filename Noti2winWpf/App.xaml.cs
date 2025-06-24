@@ -19,8 +19,34 @@ namespace Noti2winWpf
     {
         public static string WeChatPathStr { get; set; } = string.Empty;
         public static string QQPathStr { get; set; } = string.Empty;
+        public static string DingTalkPathStr { get; set; } = string.Empty;
         protected override void OnStartup(StartupEventArgs e)
         {
+
+            string procName = Process.GetCurrentProcess().ProcessName;
+            var running = Process.GetProcessesByName(procName);
+            Console.WriteLine("running length:" + running.Length );
+            if (running.Length > 1)
+            {
+                // 已有实例在运行
+                Utils.OrdinaryNoti(null, "程序已在运行中，请勿重复打开！");
+                Application.Current.Shutdown();
+                return;
+            }
+           
+            string iconTempDir = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "IconTemp");
+            try
+            {
+                if (System.IO.Directory.Exists(iconTempDir))
+                {
+                    System.IO.Directory.Delete(iconTempDir, true);
+                }
+                System.IO.Directory.CreateDirectory(iconTempDir); 
+            }
+            catch (Exception ex)
+            {
+                Utils.WriteLog("初始化 IconTemp 文件夹失败: " + ex.Message, Utils.LogErr);
+            }
             base.OnStartup(e);
             ToastNotificationManagerCompat.OnActivated += toastArgs =>
             {
@@ -31,17 +57,23 @@ namespace Noti2winWpf
                 Application.Current.Dispatcher.Invoke(delegate
                 {
                     // TODO: Show the corresponding content
-                    switch (args["conversation"])
-                    {
-                        case "wechat":
-                            ScheduleOpenExe(@WeChatPathStr, 100);
-                            break;
-                        case "qq":
-                            ScheduleOpenExe(@QQPathStr, 100); 
+                    
+                        switch (args["conversation"])
+                        {
+                            case "wechat":
+                                ScheduleOpenExe(@WeChatPathStr, 100);
+                                break;
+                            case "qq":
+                                ScheduleOpenExe(@QQPathStr, 100);
+                                break;
+                            case "dingtalk":
+                            ScheduleOpenExe(@DingTalkPathStr, 100);
                             break;
                         default:
-                            break;
-                    }
+                                break;
+                        }
+                 
+                     
                 });
             };
         }

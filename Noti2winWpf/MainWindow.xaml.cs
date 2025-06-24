@@ -14,6 +14,7 @@ using System.Windows.Forms;
 using System.Drawing;
 using Microsoft.Win32;
 using System.Threading.Tasks;
+using System.Diagnostics.Eventing.Reader;
 
 
 namespace Noti2winWpf
@@ -39,6 +40,9 @@ namespace Noti2winWpf
         private Queue<string> logQueue = new Queue<string>();
         private bool isProcessingLogQueue = false;
         private int autoMinisize = 1;
+        private HttpListener listener;
+        private bool isListening = true;
+        private System.Windows.Controls.ContextMenu trayMenu;
         AppConfig config = null;
         private void CreateNotifyIcon()
         {
@@ -47,20 +51,47 @@ namespace Noti2winWpf
             notifyIcon.Text = "WPF 应用最小化到托盘";
             notifyIcon.Visible = true;
 
-            // 创建右键菜单
-            ContextMenuStrip menu = new ContextMenuStrip();
-            ToolStripMenuItem showItem = new ToolStripMenuItem("显示窗口", null, (s, e) => ShowWindow());
-            ToolStripMenuItem exitItem = new ToolStripMenuItem("退出", null, (s, e) => System.Windows.Application.Current.Shutdown());
-            menu.Items.Add(showItem);
-            menu.Items.Add(exitItem);
-            notifyIcon.ContextMenuStrip = menu;
+            // 初始化 WPF ContextMenu
+            trayMenu = new System.Windows.Controls.ContextMenu();
+            trayMenu.Items.Add(CreateMenuItem("显示窗口", (s, e) => ShowWindow()));
+            trayMenu.Items.Add(CreateMenuItem("重新连接", (s, e) => ReOpenListener()));
+            trayMenu.Items.Add(CreateMenuItem("退出", (s, e) => System.Windows.Application.Current.Shutdown()));
 
-            // 点击托盘图标恢复窗口
-            notifyIcon.MouseClick += (s, e) =>
+            // 点击托盘图标弹出菜单
+            notifyIcon.MouseUp += (s, e) =>
             {
-                if (e.Button == MouseButtons.Left)
+                if (e.Button == MouseButtons.Right)
+                {
+                    Dispatcher.Invoke(() =>
+                    {
+                        trayMenu.IsOpen = true;
+                        trayMenu.Placement = System.Windows.Controls.Primitives.PlacementMode.MousePoint;
+                    });
+                }
+                else if (e.Button == MouseButtons.Left)
+                {
                     ShowWindow();
+                }
             };
+        }
+        // 辅助方法：创建 WPF 菜单项
+        private System.Windows.Controls.MenuItem CreateMenuItem(string header, RoutedEventHandler clickHandler)
+        {
+            var item = new System.Windows.Controls.MenuItem { Header = header };
+            item.Click += clickHandler;
+            return item;
+        }
+        private void ReOpenListener()
+        {
+            if (listener != null && listener.IsListening)
+            {
+                isListening = false; // 停止监听
+                listener.Stop();
+                listener.Close();
+                listener = null;
+                label.Content = "";
+            }
+            init(true);
         }
 
         protected override void OnStateChanged(EventArgs e)
@@ -69,7 +100,7 @@ namespace Noti2winWpf
             if (this.WindowState == WindowState.Minimized)
             {
                 this.Hide(); // 隐藏窗口
-                notifyIcon.ShowBalloonTip(2000, "通知提示", "应用已最小化到托盘", ToolTipIcon.Info);
+                Utils.OrdinaryNoti("", "应用已最小化到托盘");
             }
         }
 
@@ -112,103 +143,88 @@ namespace Noti2winWpf
 
         private void StartHttpListener()
         {
-            HttpListener listener = new HttpListener();
+            listener = new HttpListener();
             listener.Prefixes.Add("http://*:10980/");
             listener.Start();
-            while (true)
+            isListening = true;
+            while (isListening)
             {
-                HttpListenerContext context = listener.GetContext();
-                HttpListenerRequest request = context.Request;
-                HttpListenerResponse response = context.Response;
-                // 解析请求的内容
-                string requestBody;
-                string responseString = "0";
-                using (var reader = new StreamReader(request.InputStream, Encoding.UTF8))
+                try
                 {
-                    requestBody = reader.ReadToEnd();
-
-                    Message message = null;
-                    try
+                    HttpListenerContext context = listener.GetContext();
+                    HttpListenerRequest request = context.Request;
+                    HttpListenerResponse response = context.Response;
+                    // 解析请求的内容
+                    string requestBody;
+                    string responseString = "0";
+                    using (var reader = new StreamReader(request.InputStream, Encoding.UTF8))
                     {
-                        message = JsonConvert.DeserializeObject<Message>(requestBody);
-                        if (message.type == -1)
+                        requestBody = reader.ReadToEnd();
+
+                        Message message = null;
+                        try
                         {
-                            Dispatcher.Invoke(() =>
+                            message = JsonConvert.DeserializeObject<Message>(requestBody);
+                            if (message.type == -1)
                             {
-                                //处理链接成功情况
-                                addTextLog("设备连接成功");
-                                SetSuccessImage();
-                                if (autoMinisize==1)
-                                    MinimizeWindowWithDelay();
-                            });
-                            responseString = "1";
+                                Dispatcher.Invoke(() =>
+                                {
+                                    //处理链接成功情况
+                                    addTextLog("设备连接成功");
+                                    SetSuccessImage();
+                                    if (autoMinisize == 1)
+                                        MinimizeWindowWithDelay();
+                                });
+                                responseString = "1";
+                            }
+                            else
+                            {
+                                Console.WriteLine(requestBody);
+                               Utils.showMsgNoti((NotiType)message.type, message.title, message.content, message.iconBase64);
+                                responseString = "" + message.uuid;
+                            }
                         }
-                        else
+                        catch (Exception e)
                         {
-                            Console.WriteLine(requestBody);
-                            showNoti((NotiType)message.type, message.title, message.content);
-                            responseString = "" + message.uuid;
+                            responseString = e.ToString();
+                            Console.WriteLine(e);
                         }
                     }
-                    catch (Exception e)
-                    {
-                        responseString = e.ToString();
-                        Console.WriteLine(e);
-                    }
+                    byte[] buffer = System.Text.Encoding.UTF8.GetBytes(responseString);
+                    response.ContentLength64 = buffer.Length;
+                    System.IO.Stream output = response.OutputStream;
+                    output.Write(buffer, 0, buffer.Length);
+                    output.Close();
                 }
-                byte[] buffer = System.Text.Encoding.UTF8.GetBytes(responseString);
-                response.ContentLength64 = buffer.Length;
-                System.IO.Stream output = response.OutputStream;
-                output.Write(buffer, 0, buffer.Length);
-                output.Close();
-            }
-        }
-        private void showNoti(NotiType type, string title, string content)
-        {
-            string currentDirectory = AppDomain.CurrentDomain.BaseDirectory;
-            string imgPath = System.IO.Path.Combine(currentDirectory, "Image", "wechat.png");
-            string argumentStr = "conversation";
-            string conType = "wechat";
-            if (type == NotiType.qq)
-            {
-                conType = "qq";
-                imgPath = System.IO.Path.Combine(currentDirectory, "Image", "QQ.png");
-            }
-
-            new ToastContentBuilder()
-                .AddArgument(argumentStr, conType)
-                .AddText(title)
-                .AddText(content)
-                .AddAppLogoOverride(new Uri(@imgPath), ToastGenericAppLogoCrop.Default)
-                .Show();
-        }
-
-
-        private List<string> GetLocalIPv4s()
-        {
-            List<string> localIPs = new List<string>();
-            var host = Dns.GetHostEntry(Dns.GetHostName());
-            foreach (var ip in host.AddressList)
-            {
-                if (ip.AddressFamily == AddressFamily.InterNetwork)
+                catch (HttpListenerException e)
                 {
-                    localIPs.Add(ip.ToString());
+                    // 处理HttpListener异常
+                    Utils.WriteLog("HttpListenerException: " + e.Message, Utils.LogErr);
+                }
+                catch (Exception ex)
+                {
+                    // 处理其他异常
+                    Utils.WriteLog("Error in HTTP Listener: " + ex.Message, Utils.LogErr);
                 }
             }
-            return localIPs;
         }
+      
 
+   
         public enum NotiType
         {
             wechat = 0,
-            qq = 1
+            qq = 1,
+            phone = 2,
+            dingtalk = 3
         }
 
         private void setExePath()
         {
-            App.QQPathStr = GetQQNTExecutablePath();
-            App.WeChatPathStr = GetWeChatExecutablePath();
-            if (App.QQPathStr ==null || App.QQPathStr == string.Empty)
+            App.QQPathStr = Utils.GetQQNTExecutablePath();
+            App.WeChatPathStr = Utils.GetWeChatExecutablePath();
+            App.DingTalkPathStr = Utils.GetDingTalkExecutablePath();
+            if (App.QQPathStr == null || App.QQPathStr == string.Empty)
             {
 
                 if (config.QQPath.Equals(""))
@@ -232,7 +248,8 @@ namespace Noti2winWpf
                     }
                 }
             }
-            else { 
+            else
+            {
                 addTextLog("QQ安装检测: 注册表读取成功");
             }
             if (App.WeChatPathStr == null || App.WeChatPathStr == string.Empty)
@@ -259,76 +276,56 @@ namespace Noti2winWpf
                     }
 
                 }
-              
+
             }
             else
             {
                 addTextLog("微信安装检测: 注册表读取成功");
             }
-
-        }
-        private static string GetWeChatExecutablePath()
-        {
-            try
+            if (App.DingTalkPathStr == null || App.DingTalkPathStr == string.Empty)
             {
-                string regPath = @"Software\Tencent\WeChat";
-                using (RegistryKey key = Registry.CurrentUser.OpenSubKey(regPath))
+
+                if (config.DingTalkPath.Equals(""))
                 {
-                    if (key != null)
+                    //处理QQNT没找到路径
+                    addTextLog("钉钉安装检测: 失败");
+                    Utils.WriteLog("Unable to find the executable file for DingTalk", Utils.LogRun);
+                }
+                else
+                {
+                    if (Utils.IsValidExecutablePath(@config.DingTalkPath))
                     {
-                        object installPath = key.GetValue("InstallPath");
-                        if (installPath != null)
-                        {
-                            string exePath = Path.Combine(installPath.ToString(), "WeChat.exe");
-                            if (File.Exists(exePath))
-                                return exePath;
-                        }
+                        addTextLog("钉钉安装检测: 读取用户自定义");
+                        App.DingTalkPathStr = @config.DingTalkPath;
+                    }
+                    else
+                    {
+                        //处理QQNT路径不合法
+                        addTextLog("钉钉安装检测: 用户自定义有误");
+                        Utils.WriteLog("DingTalk path is invalid", Utils.LogRun);
                     }
                 }
             }
-            catch (Exception e)
+            else
             {
-                Utils.WriteLog("Error getting WeChat path: " + e.Message, Utils.LogErr);
+                addTextLog("钉钉安装检测: 读取成功");
             }
-
-
-            return string.Empty;
         }
 
 
-        private static string GetQQNTExecutablePath()
+        private void init(bool reload = false)
         {
             try
             {
-                string regPath = @"Software\Tencent\QQNT";
-                using (RegistryKey key = Registry.LocalMachine.OpenSubKey(regPath))
+                if (!reload)
                 {
-                    if (key != null)
-                    {
-                        object installPath = key.GetValue("Install");
-                        if (installPath != null)
-                        {
-                            string exePath = Path.Combine(installPath.ToString(), "QQ.exe");
-                            if (File.Exists(exePath))
-                                return exePath;
-                        }
-                    }
+                    //管理员权限 防火墙
+                    ConfigureFirewall(port);
                 }
-            }
-            catch (Exception e)
-            {
-                Utils.WriteLog("Error getting QQNT path: " + e.Message, Utils.LogErr);
-            }
-
-            return string.Empty;
-        }
-
-        private void init()
-        {
-            try
-            {
-                //管理员权限 防火墙
-                ConfigureFirewall(port);
+                else
+                {
+                    label.Content = "";
+                }
                 //设置端口
                 port = Utils.GetAvailablePort(port);
                 if (port == -1)
@@ -339,7 +336,7 @@ namespace Noti2winWpf
                     Utils.WriteLog("No available port", Utils.LogRun);
                     return;
                 }
-                var localIPs = GetLocalIPv4s();
+                var localIPs = Utils.GetLocalIPv4s();
                 if (localIPs.Count == 0)
                 {
                     //处理没有可用ip情况
